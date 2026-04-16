@@ -4,6 +4,9 @@ const state = {
   token: localStorage.getItem("sgr_token"),
   user: null,
   view: "dashboard",
+  ui: {
+    sidebarCollapsed: window.innerWidth <= 1180,
+  },
   cadastros: {
     section: "vereadores",
     editing: { entity: null, id: null },
@@ -67,6 +70,26 @@ const comprasSections = [
 
 const $ = (selector) => document.querySelector(selector);
 
+function syncSidebarState() {
+  const appShell = $("#app-shell");
+  const sidebarToggle = $("#sidebar-toggle");
+  if (!appShell || !sidebarToggle) return;
+  appShell.classList.toggle("sidebar-collapsed", state.ui.sidebarCollapsed);
+  sidebarToggle.setAttribute("aria-expanded", String(!state.ui.sidebarCollapsed));
+  sidebarToggle.setAttribute("aria-label", state.ui.sidebarCollapsed ? "Abrir menu" : "Recolher menu");
+  sidebarToggle.title = state.ui.sidebarCollapsed ? "Abrir menu" : "Recolher menu";
+}
+
+function collapseSidebar() {
+  state.ui.sidebarCollapsed = true;
+  syncSidebarState();
+}
+
+function toggleSidebar(forceValue = null) {
+  state.ui.sidebarCollapsed = typeof forceValue === "boolean" ? forceValue : !state.ui.sidebarCollapsed;
+  syncSidebarState();
+}
+
 function money(value) {
   return Number(value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
@@ -81,6 +104,28 @@ function esc(value) {
 
 function today() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function formatCompetencia(value) {
+  if (!value) return "-";
+  const [year, month] = String(value).split("-");
+  if (!year || !month) return value;
+  const date = new Date(Number(year), Number(month) - 1, 1);
+  return date.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+}
+
+function formatDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("pt-BR");
+}
+
+function formatDate(value) {
+  if (!value) return "-";
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("pt-BR");
 }
 
 function showToast(message) {
@@ -610,6 +655,7 @@ function showLogin() {
 function showApp() {
   $("#login-screen").classList.add("hidden");
   $("#app-shell").classList.remove("hidden");
+  syncSidebarState();
 }
 
 function renderNav() {
@@ -619,6 +665,7 @@ function renderNav() {
   $("#main-nav").querySelectorAll("button").forEach((button) => {
     button.addEventListener("click", () => {
       state.view = button.dataset.view;
+      collapseSidebar();
       render();
     });
   });
@@ -659,6 +706,106 @@ function metric(label, value, tone = "") {
   return `<article class="metric ${tone}"><span class="muted">${esc(label)}</span><strong>${esc(value)}</strong></article>`;
 }
 
+function renderPrestacaoOutput(result) {
+  if (!result) {
+    return `
+      <div id="prestacao-output" class="item-card prestacao-empty">
+        <p class="muted">Selecione a competência e o vereador para gerar um resumo mensal legível.</p>
+      </div>
+    `;
+  }
+  const resumo = result.resumo || {};
+  const periodo = result.periodo || {};
+  const detalhes = result.detalhes || {};
+  const vereador = result.vereador || state.base.vereadores.find((item) => item.id === Number(result.resumo?.vereadores?.[0])) || state.base.vereadores.find((item) => item.id === Number(result.vereador_id));
+  const requisicoes = detalhes.requisicoes || [];
+  const compras = detalhes.compras || [];
+  const requisicaoRows = requisicoes.map(
+    (item) => `
+      <tr>
+        <td>${formatDate(item.data_requisicao)}</td>
+        <td>${esc(item.polo_nome || "-")}</td>
+        <td>${esc(item.descricao)}</td>
+        <td>${statusBadge(item.status)}</td>
+        <td>${money(item.total_estimado || 0)}</td>
+      </tr>
+    `
+  );
+  const compraRows = compras.map(
+    (item) => `
+      <tr>
+        <td>${formatDate(item.data_compra)}</td>
+        <td>${esc(item.fornecedor_nome || "-")}</td>
+        <td>${esc(item.emenda_codigo || "-")}</td>
+        <td>${esc(item.requisicao_descricao || "-")}</td>
+        <td>${money(item.valor_total || 0)}</td>
+      </tr>
+    `
+  );
+  return `
+    <section id="prestacao-output" class="prestacao-card">
+      <div class="prestacao-head item-card">
+        <div>
+          <p class="eyebrow">Prestação gerada</p>
+          <h3>${esc(vereador?.nome || "Resumo mensal")}</h3>
+          <p class="muted">Competência ${esc(formatCompetencia(result.competencia))} · Gerado em ${esc(formatDateTime(result.gerado_em))}</p>
+        </div>
+        ${statusBadge(result.status || "GERADO")}
+      </div>
+      <div class="metric-grid">
+        ${metric("Polos cobertos", resumo.polos || 0)}
+        ${metric("Beneficiários", resumo.beneficiarios || 0)}
+        ${metric("Requisições", resumo.requisicoes || 0)}
+        ${metric("Compras", money(resumo.compras || 0))}
+      </div>
+      <div class="grid-2">
+        <article class="item-card stack">
+          <h3>Consolidação financeira</h3>
+          <div class="prestacao-kpis">
+            <div><span class="muted">Valor das emendas</span><strong>${money(resumo.valor_emendas || 0)}</strong></div>
+            <div><span class="muted">Saldo disponível</span><strong>${money(resumo.saldo_emendas || 0)}</strong></div>
+          </div>
+        </article>
+        <article class="item-card stack">
+          <h3>Rastreabilidade</h3>
+          <div class="prestacao-kpis">
+            <div><span class="muted">Identificador</span><strong>${esc(result.id || "-")}</strong></div>
+            <div><span class="muted">Vereador vinculado</span><strong>${esc(vereador?.nome || "Não localizado")}</strong></div>
+          </div>
+        </article>
+      </div>
+      <div class="section">
+        <div class="section-head">
+          <h3>Movimentação do período</h3>
+          <p class="muted">Competência ${esc(formatCompetencia(result.competencia))}</p>
+        </div>
+        <div class="metric-grid">
+          ${metric("Requisições no mês", periodo.requisicoes || 0, "warn")}
+          ${metric("Valor requisitado", money(periodo.valor_requisitado || 0), "warn")}
+          ${metric("Compras no mês", periodo.compras || 0, "good")}
+          ${metric("Valor executado", money(periodo.valor_compras || 0), "good")}
+        </div>
+      </div>
+      <div class="grid-2">
+        <section class="section">
+          <div class="section-head">
+            <h3>Requisições do período</h3>
+            <p class="muted">${requisicoes.length} registro(s)</p>
+          </div>
+          ${table(["Data", "Polo", "Descrição", "Status", "Estimado"], requisicaoRows)}
+        </section>
+        <section class="section">
+          <div class="section-head">
+            <h3>Compras do período</h3>
+            <p class="muted">${compras.length} registro(s)</p>
+          </div>
+          ${table(["Data", "Fornecedor", "Emenda", "Requisição", "Valor"], compraRows)}
+        </section>
+      </div>
+    </section>
+  `;
+}
+
 function renderShellTitle() {
   const current = views.find(([id]) => id === state.view) || views[0];
   $("#view-title").textContent = current[2];
@@ -668,6 +815,7 @@ function renderShellTitle() {
 async function render() {
   renderNav();
   renderShellTitle();
+  syncSidebarState();
   const view = $("#app-view");
   view.innerHTML = `<div class="item-card"><p class="muted">Carregando...</p></div>`;
   try {
@@ -1286,7 +1434,7 @@ async function relatoriosView() {
           <label>Vereador <select name="vereador_id">${options(state.base.vereadores)}</select></label>
           <button class="primary" type="submit">Gerar resumo</button>
         </div>
-        <pre id="prestacao-output" class="item-card muted"></pre>
+        ${renderPrestacaoOutput(null)}
       </form>
       <div class="section"><h3>Controle de emendas</h3>${table(["Código", "Vereador", "Total", "Utilizado", "Disponível"], emendaRows)}</div>
       <div class="section"><h3>Auditoria</h3>${table(["Data", "Entidade", "Ação", "Registro"], auditRows)}</div>
@@ -1963,7 +2111,10 @@ function bindViewEvents() {
           method: "POST",
           body: "{}",
         });
-        $("#prestacao-output").textContent = JSON.stringify(result, null, 2);
+        const output = $("#prestacao-output");
+        if (output) {
+          output.outerHTML = renderPrestacaoOutput({ ...result, vereador_id: Number(data.vereador_id) });
+        }
       } catch (error) {
         showToast(error.message);
       }
@@ -2000,6 +2151,10 @@ $("#logout-button").addEventListener("click", () => {
   showLogin();
 });
 
+$("#sidebar-toggle").addEventListener("click", () => {
+  toggleSidebar();
+});
+
 window.addEventListener("online", () => {
   $("#connection-pill").textContent = "Online";
   $("#connection-pill").className = "pill good";
@@ -2008,6 +2163,10 @@ window.addEventListener("online", () => {
 window.addEventListener("offline", () => {
   $("#connection-pill").textContent = "Offline";
   $("#connection-pill").className = "pill bad";
+});
+
+window.addEventListener("resize", () => {
+  syncSidebarState();
 });
 
 bootstrap();

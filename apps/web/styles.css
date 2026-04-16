@@ -344,6 +344,11 @@ tbody tr:hover {
   min-height: 100vh;
   gap: 1.25rem;
   padding: 1.1rem;
+  transition: grid-template-columns 180ms ease;
+}
+
+.app-shell.sidebar-collapsed {
+  grid-template-columns: 1fr;
 }
 
 .sidebar {
@@ -356,6 +361,11 @@ tbody tr:hover {
   border-radius: 28px;
   padding: 1.2rem;
   box-shadow: var(--shadow-soft);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.app-shell.sidebar-collapsed .sidebar {
+  display: none;
 }
 
 .sidebar-brand {
@@ -425,6 +435,38 @@ tbody tr:hover {
   position: sticky;
   top: 1.1rem;
   z-index: 5;
+}
+
+.topbar-main {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.sidebar-toggle {
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.24rem;
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  padding: 0.8rem;
+  background: rgba(23, 99, 194, 0.08);
+  color: var(--blue-deep);
+  box-shadow: inset 0 0 0 1px rgba(23, 99, 194, 0.08);
+}
+
+.sidebar-toggle span {
+  display: block;
+  width: 100%;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.sidebar-toggle:hover {
+  background: rgba(23, 99, 194, 0.12);
 }
 
 .topbar-actions {
@@ -655,6 +697,43 @@ tbody tr:hover {
   background: linear-gradient(90deg, var(--blue), var(--green));
 }
 
+.prestacao-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.prestacao-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.prestacao-empty {
+  min-height: 140px;
+  align-items: center;
+  display: flex;
+}
+
+.prestacao-kpis {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.prestacao-kpis div {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.95rem 1rem;
+  border-radius: 18px;
+  background: rgba(23, 99, 194, 0.04);
+  border: 1px solid rgba(23, 49, 45, 0.07);
+}
+
+.prestacao-kpis strong {
+  font-size: 1.1rem;
+  color: var(--ink);
+}
+
 .toast {
   padding: 0.95rem 1.1rem;
   background: rgba(255, 248, 220, 0.92);
@@ -746,6 +825,15 @@ tbody tr:hover {
   }
 
   .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .topbar-main {
+    width: 100%;
+  }
+
+  .prestacao-head {
     align-items: flex-start;
     flex-direction: column;
   }

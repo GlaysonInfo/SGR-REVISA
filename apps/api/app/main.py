@@ -174,6 +174,18 @@ def has_records(db: Session, model: Any, *criteria: Any) -> bool:
     return bool(db.scalar(select(func.count()).select_from(model).where(*criteria)))
 
 
+def competencia_period_bounds(competencia: str) -> tuple[date, date]:
+    try:
+        inicio = date.fromisoformat(f"{competencia}-01")
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Competencia invalida. Use o formato AAAA-MM.")
+    if inicio.month == 12:
+        fim = date(inicio.year + 1, 1, 1)
+    else:
+        fim = date(inicio.year, inicio.month + 1, 1)
+    return inicio, fim
+
+
 def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: Session = Depends(get_db),
@@ -296,6 +308,18 @@ def serialize_requisicao(requisicao: RequisicaoCompra) -> dict[str, Any]:
             "vereador_nome": requisicao.vereador.nome if requisicao.vereador else None,
             "total_estimado": total_estimado,
             "itens": [as_dict(item) for item in requisicao.itens],
+        },
+    )
+
+
+def serialize_compra(compra: Compra) -> dict[str, Any]:
+    return as_dict(
+        compra,
+        {
+            "fornecedor_nome": compra.fornecedor.nome if compra.fornecedor else None,
+            "emenda_codigo": compra.emenda.codigo if compra.emenda else None,
+            "requisicao_descricao": compra.requisicao.descricao if compra.requisicao else None,
+            "requisicao_id": compra.requisicao_id,
         },
     )
 
@@ -1777,8 +1801,63 @@ def relatorio_vereador(vereador_id: int | None = None, db: Session = Depends(get
 @api.post("/prestacao-contas/gerar")
 def gerar_prestacao_contas(competencia: str, vereador_id: int, db: Session = Depends(get_db), user: Usuario = Depends(get_current_user)) -> dict[str, Any]:
     require_finance(user)
+    vereador = ensure_vereador_in_scope(db, user, vereador_id)
+    inicio, fim = competencia_period_bounds(competencia)
     base = relatorio_vereador(vereador_id=vereador_id, db=db, user=user)
-    return {"id": f"pc-{vereador_id}-{competencia}", "competencia": competencia, "gerado_em": datetime.utcnow().isoformat(), "status": "GERADO", "resumo": base}
+    requisicoes = (
+        db.execute(
+            select(RequisicaoCompra)
+            .options(joinedload(RequisicaoCompra.polo), joinedload(RequisicaoCompra.vereador), joinedload(RequisicaoCompra.itens))
+            .where(
+                RequisicaoCompra.vereador_id == vereador_id,
+                RequisicaoCompra.data_requisicao >= inicio,
+                RequisicaoCompra.data_requisicao < fim,
+            )
+            .order_by(RequisicaoCompra.data_requisicao.desc(), RequisicaoCompra.id.desc())
+        )
+        .unique()
+        .scalars()
+        .all()
+    )
+    compras = (
+        db.execute(
+            select(Compra)
+            .options(joinedload(Compra.fornecedor), joinedload(Compra.emenda), joinedload(Compra.requisicao))
+            .join(Emenda)
+            .where(
+                Emenda.vereador_id == vereador_id,
+                Compra.data_compra >= inicio,
+                Compra.data_compra < fim,
+            )
+            .order_by(Compra.data_compra.desc(), Compra.id.desc())
+        )
+        .unique()
+        .scalars()
+        .all()
+    )
+    requisicoes_serialized = [serialize_requisicao(item) for item in requisicoes]
+    compras_serialized = [serialize_compra(item) for item in compras]
+    periodo = {
+        "inicio": inicio.isoformat(),
+        "fim": fim.isoformat(),
+        "requisicoes": len(requisicoes_serialized),
+        "valor_requisitado": sum(item["total_estimado"] for item in requisicoes_serialized),
+        "compras": len(compras_serialized),
+        "valor_compras": sum((item.get("valor_total") or 0) for item in compras_serialized),
+    }
+    return {
+        "id": f"pc-{vereador_id}-{competencia}",
+        "competencia": competencia,
+        "gerado_em": datetime.utcnow().isoformat(),
+        "status": "GERADO",
+        "vereador": {"id": vereador.id, "nome": vereador.nome},
+        "resumo": base,
+        "periodo": periodo,
+        "detalhes": {
+            "requisicoes": requisicoes_serialized,
+            "compras": compras_serialized,
+        },
+    }
 
 
 @api.get("/prestacao-contas/{prestacao_id}")
