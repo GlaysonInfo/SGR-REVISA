@@ -6,6 +6,7 @@ const state = {
   view: "dashboard",
   ui: {
     sidebarCollapsed: window.innerWidth <= 1180,
+    pendingFocus: null,
   },
   cadastros: {
     section: "vereadores",
@@ -16,6 +17,9 @@ const state = {
   },
   comprasUi: {
     section: "requisicoes",
+  },
+  relatorios: {
+    competencia: new Date().toISOString().slice(0, 7),
   },
   management: {
     beneficiarios: { id: null },
@@ -47,6 +51,9 @@ const views = [
   ["usuarios", "Usuários", "Perfis e Permissões"],
 ];
 
+const POLO_VIEWS = new Set(["dashboard", "beneficiarios", "operacao", "compras", "relatorios", "mobile"]);
+const MOBILE_VIEWS = new Set(["dashboard", "beneficiarios", "mobile"]);
+
 const cadastroSections = [
   ["vereadores", "Vereadores", "Representantes e escopos políticos."],
   ["polos", "Polos", "Unidades, responsáveis locais e território."],
@@ -69,6 +76,47 @@ const comprasSections = [
 ];
 
 const $ = (selector) => document.querySelector(selector);
+
+function isAdminProfile() {
+  return ["Super Admin", "Gestor Institucional REVISA"].includes(state.user?.perfil);
+}
+
+function isPoloProfile() {
+  return ["Gestor de Polo", "Operador de Polo"].includes(state.user?.perfil);
+}
+
+function isMobileProfile() {
+  return state.user?.perfil === "Captador Mobile";
+}
+
+function canManageModalidades() {
+  return isAdminProfile() || state.user?.perfil === "Gestor de Polo";
+}
+
+function getVisibleViews() {
+  if (isMobileProfile()) return views.filter(([id]) => MOBILE_VIEWS.has(id));
+  if (isPoloProfile()) return views.filter(([id]) => POLO_VIEWS.has(id));
+  return views;
+}
+
+function applyPendingFocus() {
+  if (!state.ui.pendingFocus) return;
+  const target = document.querySelector(state.ui.pendingFocus);
+  if (!target) return;
+  target.scrollIntoView({ behavior: "smooth", block: "center" });
+  if (typeof target.focus === "function") target.focus();
+  state.ui.pendingFocus = null;
+}
+
+function navigateToView(view, section = null, focusSelector = null) {
+  state.view = view;
+  if (view === "operacao" && section) setViewSection("operacao", section);
+  if (view === "compras" && section) setViewSection("comprasUi", section);
+  if (view === "relatorios" && section) state.relatorios.competencia = section;
+  state.ui.pendingFocus = focusSelector;
+  collapseSidebar();
+  render();
+}
 
 function syncSidebarState() {
   const appShell = $("#app-shell");
@@ -635,7 +683,10 @@ function renderFornecedoresPanel() {
 }
 
 async function api(path, options = {}) {
-  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+  const headers = { ...(options.headers || {}) };
+  if (!(options.body instanceof FormData) && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
   const response = await fetch(`${API}${path}`, { ...options, headers });
   const text = await response.text();
@@ -659,14 +710,13 @@ function showApp() {
 }
 
 function renderNav() {
-  $("#main-nav").innerHTML = views
+  const visibleViews = getVisibleViews();
+  $("#main-nav").innerHTML = visibleViews
     .map(([id, label]) => `<button class="${state.view === id ? "active" : ""}" data-view="${id}">${label}</button>`)
     .join("");
   $("#main-nav").querySelectorAll("button").forEach((button) => {
     button.addEventListener("click", () => {
-      state.view = button.dataset.view;
-      collapseSidebar();
-      render();
+      navigateToView(button.dataset.view);
     });
   });
 }
@@ -731,8 +781,79 @@ function renderPrestacaoOutput(result) {
       </tr>
     `
   );
+
+  function routineActionCard(title, description, buttonLabel, view, section, focusSelector, tone = "") {
+    return `
+      <article class="item-card routine-card ${tone}">
+        <div class="stack">
+          <p class="eyebrow">Rotina do polo</p>
+          <h3>${esc(title)}</h3>
+          <p class="muted">${esc(description)}</p>
+        </div>
+        <button type="button" class="secondary routine-action" data-view="${view}" data-section="${section || ""}" data-focus="${focusSelector || ""}">${esc(buttonLabel)}</button>
+      </article>
+    `;
+  }
+
+  async function poloDashboardView() {
+    await refreshBase();
+    const dashboard = await api(`/polos/${state.user.polo_id}/dashboard`);
+    const requisicoes = await api("/requisicoes-compra").catch(() => []);
+    const recentes = requisicoes.slice(0, 5).map(
+      (item) => `<tr><td>${esc(item.descricao)}</td><td>${statusBadge(item.status)}</td><td>${money(item.total_estimado || 0)}</td></tr>`
+    );
+    return `
+      <section class="section">
+        <div class="item-card polo-hero">
+          <div class="stack">
+            <p class="eyebrow">Visão rotineira</p>
+            <h3>Gestão do polo ${esc((state.base.polos.find((item) => item.id === state.user?.polo_id) || {}).nome || "")}</h3>
+            <p class="muted">Sua rotina diária está concentrada em operação, requisições, beneficiários e relatório mensal.</p>
+          </div>
+          <div class="metric-grid">
+            ${metric("Beneficiários ativos", dashboard.beneficiarios || 0)}
+            ${metric("Turmas", dashboard.turmas || 0)}
+            ${metric("Inscrições", dashboard.inscricoes || 0)}
+            ${metric("Frequência", `${dashboard.frequencia_percentual || 0}%`)}
+          </div>
+        </div>
+        <div class="routine-grid">
+          ${canManageModalidades() ? routineActionCard("Criar modalidades", "Cadastre rapidamente uma nova modalidade para abrir novas turmas no polo.", "Abrir cadastro", "operacao", "turmas", "#modalidade-form [name='nome']", "good") : ""}
+          ${routineActionCard("Registrar presenças", "Carregue a turma do dia e marque presença dos beneficiários com observação.", "Lançar frequência", "operacao", "frequencia", "#frequencia-loader [name='turma_id']", "good")}
+          ${routineActionCard("Inserir fotos no relatório mensal", "Anexe fotos do mês para compor o relatório operacional do polo.", "Enviar fotos", "relatorios", state.relatorios.competencia, "#relatorio-foto-form [name='titulo']", "warn")}
+          ${routineActionCard("Fazer requisição de materiais", "Abra uma requisição de compra com prioridade e item principal estimado.", "Nova requisição", "compras", "requisicoes", "#requisicao-form [name='descricao']", "warn")}
+          ${routineActionCard("Inserir beneficiário na modalidade", "Use a inscrição para vincular o beneficiário à turma correta no polo.", "Nova inscrição", "operacao", "turmas", "#inscricao-form [name='beneficiario_id']", "good")}
+        </div>
+        <div class="grid-2">
+          <section class="section">
+            <div class="section-head">
+              <h3>Checklist operacional</h3>
+              <span class="muted">Rotina recomendada</span>
+            </div>
+            <div class="item-card stack">
+              <p>1. Confirmar modalidades e turmas ativas do polo.</p>
+              <p>2. Vincular beneficiários nas turmas corretas.</p>
+              <p>3. Lançar frequência diária com observações.</p>
+              <p>4. Abrir requisições de materiais quando necessário.</p>
+              <p>5. Fechar o mês com fotos do relatório mensal.</p>
+            </div>
+          </section>
+          <section class="section">
+            <div class="section-head">
+              <h3>Requisições recentes</h3>
+              <span class="muted">Escopo do seu polo</span>
+            </div>
+            ${table(["Descrição", "Status", "Estimado"], recentes)}
+          </section>
+        </div>
+      </section>
+    `;
+  }
   const compraRows = compras.map(
     (item) => `
+    if (isPoloProfile() && state.user?.polo_id) {
+      return poloDashboardView();
+    }
       <tr>
         <td>${formatDate(item.data_compra)}</td>
         <td>${esc(item.fornecedor_nome || "-")}</td>
@@ -807,12 +928,17 @@ function renderPrestacaoOutput(result) {
 }
 
 function renderShellTitle() {
-  const current = views.find(([id]) => id === state.view) || views[0];
+  const visibleViews = getVisibleViews();
+  const current = visibleViews.find(([id]) => id === state.view) || visibleViews[0] || views[0];
   $("#view-title").textContent = current[2];
   $("#profile-line").textContent = `${state.user?.nome || ""} · ${state.user?.perfil || ""}`;
 }
 
 async function render() {
+  const visibleViews = getVisibleViews();
+  if (visibleViews.length && !visibleViews.some(([id]) => id === state.view)) {
+    state.view = visibleViews[0][0];
+  }
   renderNav();
   renderShellTitle();
   syncSidebarState();
@@ -828,6 +954,7 @@ async function render() {
     if (state.view === "relatorios") view.innerHTML = await relatoriosView();
     if (state.view === "usuarios") view.innerHTML = await usuariosView();
     bindViewEvents();
+    applyPendingFocus();
   } catch (error) {
     view.innerHTML = `<div class="item-card"><p class="error">${esc(error.message)}</p></div>`;
   }
@@ -1041,6 +1168,18 @@ function operacaoActionButtons(entity, item, archived = false, disableDelete = f
 
 function renderTurmasOperacaoPanel() {
   const editing = findCadastroItem("turmas", activeManagementEditing("turmas"));
+  const modalidadeForm = canManageModalidades()
+    ? `
+        <form id="modalidade-form" class="form-band cadastro-form compact-form">
+          <h3>Nova modalidade</h3>
+          <div class="grid-2">
+            <label>Área <input name="area_nome" value="Esporte e Cultura" /></label>
+            <label>Modalidade* <input name="nome" placeholder="Ex.: Futsal" required /></label>
+          </div>
+          <button class="secondary" type="submit">Salvar modalidade</button>
+        </form>
+      `
+    : "";
   const rows = state.base.turmas.map(
     (item) => `
       <tr>
@@ -1056,6 +1195,7 @@ function renderTurmasOperacaoPanel() {
   return `
     <div class="cadastro-layout">
       <div class="section cadastro-form-stack">
+        ${modalidadeForm}
         <form id="turma-form" class="form-band cadastro-form">
           <input type="hidden" name="id" value="${editing?.id || ""}" />
           <div class="section-head">
@@ -1412,6 +1552,58 @@ async function comprasView() {
 }
 
 async function relatoriosView() {
+  if (isPoloProfile()) {
+    const competenciaAtual = state.relatorios.competencia;
+    const relPolo = await api("/relatorios/polo").catch(() => ({}));
+    const fotos = await api(`/relatorios/polo/fotos?competencia=${encodeURIComponent(competenciaAtual)}`).catch(() => []);
+    const fotoRows = fotos.map(
+      (item) => `
+        <tr>
+          <td>${esc(item.titulo)}</td>
+          <td>${esc(item.nome_original || "-")}</td>
+          <td>${formatDateTime(item.created_at || item.data_upload)}</td>
+          <td><a href="${esc(item.url_storage || "#")}" target="_blank" rel="noreferrer">Abrir</a></td>
+        </tr>
+      `
+    );
+    return `
+      <section class="section">
+        <div class="metric-grid">
+          ${metric("Beneficiários", relPolo.beneficiarios || 0)}
+          ${metric("Turmas", relPolo.turmas || 0)}
+          ${metric("Frequência", `${relPolo.frequencia_percentual || 0}%`)}
+          ${metric("Requisições", relPolo.requisicoes || 0)}
+        </div>
+        <div class="cadastro-layout">
+          <form id="relatorio-foto-form" class="form-band cadastro-form">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Relatório mensal</p>
+                <h3>Inserir fotos do polo</h3>
+              </div>
+            </div>
+            <div class="grid-2">
+              <label>Competência <input name="competencia" type="month" value="${esc(competenciaAtual)}" required /></label>
+              <label>Título da foto <input name="titulo" placeholder="Aula de futsal" required /></label>
+            </div>
+            <label>Observação <textarea name="observacao" placeholder="Contexto da atividade ou entrega realizada"></textarea></label>
+            <label>Imagem <input name="foto" type="file" accept="image/*" required /></label>
+            <button class="primary" type="submit">Enviar foto para o relatório</button>
+          </form>
+          <div class="section cadastro-list-panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Competência ${esc(formatCompetencia(competenciaAtual))}</p>
+                <h3>Fotos já registradas</h3>
+              </div>
+              <span class="muted">${fotos.length} arquivo(s)</span>
+            </div>
+            ${table(["Título", "Arquivo", "Enviado em", "Visualizar"], fotoRows)}
+          </div>
+        </div>
+      </section>
+    `;
+  }
   const geral = await api("/dashboard/institucional");
   const relPolo = await api("/relatorios/polo").catch(() => ({}));
   const relVereador = await api("/relatorios/vereador").catch(() => ({}));
@@ -1917,6 +2109,12 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll(".routine-action").forEach((button) => {
+    button.addEventListener("click", () => {
+      navigateToView(button.dataset.view, button.dataset.section || null, button.dataset.focus || null);
+    });
+  });
+
   document.querySelectorAll(".cadastro-cancel").forEach((button) => {
     button.addEventListener("click", async () => {
       clearCadastroEditing(button.dataset.entity);
@@ -1967,6 +2165,21 @@ function bindViewEvents() {
     turmaForm.addEventListener("submit", (event) => {
       event.preventDefault();
       submitTurmaForm(turmaForm);
+    });
+  }
+
+  const modalidadeForm = $("#modalidade-form");
+  if (modalidadeForm) {
+    modalidadeForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      await submitJson(
+        modalidadeForm,
+        "/modalidades",
+        (data) => ({ area_nome: data.area_nome || "Geral", nome: data.nome, ativa: true }),
+        "Modalidade salva."
+      );
+      await refreshBase();
+      await render();
     });
   }
 
@@ -2115,6 +2328,25 @@ function bindViewEvents() {
         if (output) {
           output.outerHTML = renderPrestacaoOutput({ ...result, vereador_id: Number(data.vereador_id) });
         }
+      } catch (error) {
+        showToast(error.message);
+      }
+    });
+  }
+
+  const relatorioFotoForm = $("#relatorio-foto-form");
+  if (relatorioFotoForm) {
+    relatorioFotoForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const payload = new FormData(relatorioFotoForm);
+      state.relatorios.competencia = payload.get("competencia") || state.relatorios.competencia;
+      try {
+        await api("/relatorios/polo/fotos", {
+          method: "POST",
+          body: payload,
+        });
+        showToast("Foto registrada no relatório mensal.");
+        await render();
       } catch (error) {
         showToast(error.message);
       }

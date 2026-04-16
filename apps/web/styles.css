@@ -734,6 +734,41 @@ tbody tr:hover {
   color: var(--ink);
 }
 
+.polo-hero {
+  display: grid;
+  gap: 1rem;
+}
+
+.routine-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.routine-card {
+  display: grid;
+  gap: 1rem;
+  align-content: space-between;
+}
+
+.routine-card.good {
+  background: linear-gradient(180deg, rgba(244, 252, 246, 0.96), rgba(255, 255, 255, 0.88));
+}
+
+.routine-card.warn {
+  background: linear-gradient(180deg, rgba(255, 250, 238, 0.96), rgba(255, 255, 255, 0.88));
+}
+
+.table-wrap a {
+  color: var(--blue-deep);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.table-wrap a:hover {
+  text-decoration: underline;
+}
+
 .toast {
   padding: 0.95rem 1.1rem;
   background: rgba(255, 248, 220, 0.92);
@@ -799,6 +834,10 @@ tbody tr:hover {
   .grid-4,
   .grid-3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .routine-grid {
+    grid-template-columns: 1fr;
   }
 }
 

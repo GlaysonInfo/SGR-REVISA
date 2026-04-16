@@ -3,7 +3,7 @@ import json
 import re
 from typing import Any
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, status
+from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
@@ -35,6 +35,7 @@ from .models import (
     Ocorrencia,
     Polo,
     RequisicaoCompra,
+    RelatorioMensalFoto,
     Responsavel,
     SugestaoCritica,
     Turma,
@@ -100,8 +101,11 @@ def create_app() -> FastAPI:
 
     assets_dir = ROOT_DIR / "Imagens"
     web_dir = ROOT_DIR / "apps" / "web"
+    uploads_dir = ROOT_DIR / "data" / "uploads"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+    app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
     if web_dir.exists():
         app.mount("/", StaticFiles(directory=web_dir, html=True), name="web")
     return app
@@ -172,6 +176,11 @@ def audit(
 
 def has_records(db: Session, model: Any, *criteria: Any) -> bool:
     return bool(db.scalar(select(func.count()).select_from(model).where(*criteria)))
+
+
+def sanitize_storage_name(value: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "-", value).strip("-").lower()
+    return cleaned or "arquivo"
 
 
 def competencia_period_bounds(competencia: str) -> tuple[date, date]:
@@ -320,6 +329,18 @@ def serialize_compra(compra: Compra) -> dict[str, Any]:
             "emenda_codigo": compra.emenda.codigo if compra.emenda else None,
             "requisicao_descricao": compra.requisicao.descricao if compra.requisicao else None,
             "requisicao_id": compra.requisicao_id,
+        },
+    )
+
+
+def serialize_relatorio_foto(item: RelatorioMensalFoto) -> dict[str, Any]:
+    return as_dict(
+        item,
+        {
+            "polo_nome": item.polo.nome if item.polo else None,
+            "arquivo": as_dict(item.arquivo) if item.arquivo else None,
+            "url_storage": item.arquivo.url_storage if item.arquivo else None,
+            "nome_original": item.arquivo.nome_original if item.arquivo else None,
         },
     )
 
@@ -1779,6 +1800,88 @@ def relatorio_polo(polo_id: int | None = None, db: Session = Depends(get_db), us
         "ocorrencias": db.scalar(select(func.count(Ocorrencia.id)).where(Ocorrencia.polo_id.in_(polo_ids or [-1]))) or 0,
         "requisicoes": db.scalar(select(func.count(RequisicaoCompra.id)).where(RequisicaoCompra.polo_id.in_(polo_ids or [-1]))) or 0,
     }
+
+
+@api.get("/relatorios/polo/fotos")
+def list_relatorio_polo_fotos(
+    competencia: str | None = None,
+    polo_id: int | None = None,
+    db: Session = Depends(get_db),
+    user: Usuario = Depends(get_current_user),
+) -> list[dict[str, Any]]:
+    if user.perfil not in ADMIN_ROLES | POLO_ROLES:
+        raise HTTPException(status_code=403, detail="Perfil sem acesso ao relatório do polo.")
+    target_polo_id = polo_id or user.polo_id
+    if target_polo_id:
+        ensure_polo_in_scope(db, user, target_polo_id)
+        query = select(RelatorioMensalFoto).where(RelatorioMensalFoto.polo_id == target_polo_id)
+    else:
+        query = select(RelatorioMensalFoto).where(RelatorioMensalFoto.polo_id.in_(scoped_polo_ids(db, user) or [-1]))
+    if competencia:
+        competencia_period_bounds(competencia)
+        query = query.where(RelatorioMensalFoto.competencia == competencia)
+    items = (
+        db.execute(query.options(joinedload(RelatorioMensalFoto.polo), joinedload(RelatorioMensalFoto.arquivo)).order_by(RelatorioMensalFoto.created_at.desc()))
+        .unique()
+        .scalars()
+        .all()
+    )
+    return [serialize_relatorio_foto(item) for item in items]
+
+
+@api.post("/relatorios/polo/fotos")
+def upload_relatorio_polo_foto(
+    competencia: str = Form(...),
+    titulo: str = Form(...),
+    observacao: str | None = Form(default=None),
+    polo_id: int | None = Form(default=None),
+    foto: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: Usuario = Depends(get_current_user),
+) -> dict[str, Any]:
+    if user.perfil not in ADMIN_ROLES | POLO_ROLES:
+        raise HTTPException(status_code=403, detail="Perfil sem acesso ao relatório do polo.")
+    competencia_period_bounds(competencia)
+    target_polo_id = polo_id or user.polo_id
+    if not target_polo_id:
+        raise HTTPException(status_code=422, detail="Polo obrigatório para registrar foto do relatório.")
+    polo = ensure_polo_in_scope(db, user, target_polo_id)
+    content = foto.file.read()
+    if not content:
+        raise HTTPException(status_code=422, detail="Selecione uma imagem para o relatório.")
+    original_name = foto.filename or f"{titulo}.jpg"
+    base_name = original_name.rsplit(".", 1)[0]
+    suffix = original_name.rsplit(".", 1)[-1].lower() if "." in original_name else "jpg"
+    storage_name = f"{datetime.utcnow():%Y%m%d%H%M%S}-{sanitize_storage_name(base_name)}.{suffix}"
+    storage_dir = ROOT_DIR / "data" / "uploads" / "relatorios" / str(target_polo_id) / competencia
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    file_path = storage_dir / storage_name
+    file_path.write_bytes(content)
+    relative_url = f"/uploads/relatorios/{target_polo_id}/{competencia}/{storage_name}"
+    arquivo = ArquivoUpload(
+        nome_original=original_name,
+        mime_type=foto.content_type,
+        tamanho=len(content),
+        url_storage=relative_url,
+        hash_arquivo=None,
+        usuario_upload_id=user.id,
+    )
+    db.add(arquivo)
+    db.flush()
+    item = RelatorioMensalFoto(
+        polo_id=polo.id,
+        competencia=competencia,
+        titulo=titulo,
+        observacao=observacao,
+        arquivo_upload_id=arquivo.id,
+        usuario_id=user.id,
+    )
+    db.add(item)
+    db.flush()
+    audit(db, user, "relatorio_mensal_foto", item.id, "UPLOAD", after=serialize_relatorio_foto(item))
+    db.commit()
+    db.refresh(item)
+    return serialize_relatorio_foto(item)
 
 
 @api.get("/relatorios/vereador")

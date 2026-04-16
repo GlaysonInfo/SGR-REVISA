@@ -66,6 +66,7 @@ class Polo(TimestampMixin, Base):
     vereador = relationship("Vereador", back_populates="polos")
     turmas = relationship("Turma", back_populates="polo")
     requisicoes = relationship("RequisicaoCompra", back_populates="polo")
+    relatorio_fotos = relationship("RelatorioMensalFoto", back_populates="polo")
 
 
 class Usuario(TimestampMixin, Base):
@@ -383,6 +384,23 @@ class ArquivoUpload(TimestampMixin, Base):
     hash_arquivo: Mapped[str] = mapped_column(String(128), nullable=True)
     usuario_upload_id: Mapped[int] = mapped_column(ForeignKey("usuario.id"), nullable=True)
     data_upload: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    relatorio_fotos = relationship("RelatorioMensalFoto", back_populates="arquivo")
+
+
+class RelatorioMensalFoto(TimestampMixin, Base):
+    __tablename__ = "relatorio_mensal_foto"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    polo_id: Mapped[int] = mapped_column(ForeignKey("polo.id"), nullable=False, index=True)
+    competencia: Mapped[str] = mapped_column(String(7), nullable=False, index=True)
+    titulo: Mapped[str] = mapped_column(String(180), nullable=False)
+    observacao: Mapped[str] = mapped_column(Text, nullable=True)
+    arquivo_upload_id: Mapped[int] = mapped_column(ForeignKey("arquivo_upload.id"), nullable=False, index=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuario.id"), nullable=True, index=True)
+
+    polo = relationship("Polo", back_populates="relatorio_fotos")
+    arquivo = relationship("ArquivoUpload", back_populates="relatorio_fotos")
 
 
 class Auditoria(Base):
