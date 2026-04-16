@@ -65,6 +65,11 @@ textarea {
   font: inherit;
 }
 
+select[multiple] {
+  min-height: 132px;
+  padding-block: 0.7rem;
+}
+
 button {
   border: 0;
   border-radius: 999px;
@@ -474,6 +479,53 @@ tbody tr:hover {
   gap: 1rem;
 }
 
+.cadastro-overview {
+  display: grid;
+  gap: 1rem;
+}
+
+.cadastro-switcher {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.cadastro-switch {
+  display: grid;
+  gap: 0.2rem;
+  min-height: 72px;
+  padding: 0.95rem 1rem;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.68);
+  border: 1px solid rgba(23, 49, 45, 0.08);
+  color: var(--ink);
+  text-align: left;
+}
+
+.cadastro-switch small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.cadastro-switch.active {
+  background: linear-gradient(135deg, rgba(23, 99, 194, 0.14), rgba(47, 155, 85, 0.16));
+  box-shadow: inset 0 0 0 1px rgba(23, 99, 194, 0.14);
+  color: var(--blue-deep);
+}
+
+.cadastro-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.cadastro-form,
+.cadastro-list-panel {
+  min-width: 0;
+}
+
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(160px, 1fr));
@@ -520,6 +572,42 @@ tbody tr:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 0.6rem;
+}
+
+.table-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.45rem;
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid rgba(23, 49, 45, 0.08);
+  color: var(--blue-deep);
+  box-shadow: var(--shadow-soft);
+}
+
+.icon-button svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+.icon-button.warn {
+  color: #8d6500;
+}
+
+.icon-button.danger {
+  color: var(--danger);
 }
 
 .table-wrap {
@@ -599,6 +687,11 @@ tbody tr:hover {
     grid-template-columns: 1fr;
   }
 
+  .cadastro-layout,
+  .cadastro-switcher {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .sidebar {
     position: relative;
     top: 0;
@@ -626,6 +719,11 @@ tbody tr:hover {
   .grid-4,
   .grid-3,
   .grid-2 {
+    grid-template-columns: 1fr;
+  }
+
+  .cadastro-layout,
+  .cadastro-switcher {
     grid-template-columns: 1fr;
   }
 

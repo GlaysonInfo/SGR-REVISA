@@ -15,6 +15,7 @@ from .auth import create_access_token, decode_token, hash_password, verify_passw
 from .database import Base, ROOT_DIR, engine, get_db
 from .models import (
     AreaModalidade,
+    ArquivoUpload,
     Auditoria,
     Beneficiario,
     BeneficiarioPolo,
@@ -167,6 +168,10 @@ def audit(
             usuario_id=user.id if user else None,
         )
     )
+
+
+def has_records(db: Session, model: Any, *criteria: Any) -> bool:
+    return bool(db.scalar(select(func.count()).select_from(model).where(*criteria)))
 
 
 def get_current_user(
@@ -493,6 +498,30 @@ def patch_usuario_status(usuario_id: int, payload: StatusPatch, db: Session = De
     return as_dict(alvo, {"senha_hash": None})
 
 
+@api.delete("/usuarios/{usuario_id}")
+def delete_usuario(usuario_id: int, db: Session = Depends(get_db), user: Usuario = Depends(get_current_user)) -> dict[str, str]:
+    require_admin(user)
+    alvo = db.get(Usuario, usuario_id)
+    if not alvo:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado.")
+    if alvo.id == user.id:
+        raise HTTPException(status_code=409, detail="O usuário logado não pode excluir a própria conta.")
+    if any(
+        [
+            has_records(db, RequisicaoCompra, RequisicaoCompra.solicitante_usuario_id == usuario_id),
+            has_records(db, Ocorrencia, Ocorrencia.usuario_id == usuario_id),
+            has_records(db, ArquivoUpload, ArquivoUpload.usuario_upload_id == usuario_id),
+            has_records(db, Auditoria, Auditoria.usuario_id == usuario_id),
+        ]
+    ):
+        raise HTTPException(status_code=409, detail="Usuário possui histórico operacional e não pode ser excluído. Arquive o registro.")
+    before = as_dict(alvo, {"senha_hash": None})
+    db.delete(alvo)
+    audit(db, user, "usuario", usuario_id, "EXCLUIR", before=before)
+    db.commit()
+    return {"status": "ok"}
+
+
 @api.post("/usuarios/{usuario_id}/reset-senha")
 def reset_senha(usuario_id: int, db: Session = Depends(get_db), user: Usuario = Depends(get_current_user)) -> dict[str, str]:
     require_admin(user)
@@ -549,6 +578,29 @@ def patch_vereador_status(vereador_id: int, payload: StatusPatch, db: Session = 
     audit(db, user, "vereador", item.id, "ALTERAR_STATUS", before=before, after=as_dict(item))
     db.commit()
     return as_dict(item)
+
+
+@api.delete("/vereadores/{vereador_id}")
+def delete_vereador(vereador_id: int, db: Session = Depends(get_db), user: Usuario = Depends(get_current_user)) -> dict[str, str]:
+    require_admin(user)
+    item = db.get(Vereador, vereador_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Vereador nao encontrado.")
+    if any(
+        [
+            has_records(db, Polo, Polo.vereador_id == vereador_id),
+            has_records(db, Emenda, Emenda.vereador_id == vereador_id),
+            has_records(db, Usuario, Usuario.vereador_id == vereador_id),
+            has_records(db, BeneficiarioVereador, BeneficiarioVereador.vereador_id == vereador_id),
+            has_records(db, RequisicaoCompra, RequisicaoCompra.vereador_id == vereador_id),
+        ]
+    ):
+        raise HTTPException(status_code=409, detail="Vereador possui vínculos e não pode ser excluído. Arquive o registro em vez de excluir.")
+    before = as_dict(item)
+    db.delete(item)
+    audit(db, user, "vereador", vereador_id, "EXCLUIR", before=before)
+    db.commit()
+    return {"status": "ok"}
 
 
 @api.get("/emendas/controle")
@@ -633,6 +685,27 @@ def patch_emenda_status(emenda_id: int, payload: StatusPatch, db: Session = Depe
     return as_dict(item)
 
 
+@api.delete("/emendas/{emenda_id}")
+def delete_emenda(emenda_id: int, db: Session = Depends(get_db), user: Usuario = Depends(get_current_user)) -> dict[str, str]:
+    require_finance(user)
+    item = db.get(Emenda, emenda_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Emenda nao encontrada.")
+    ensure_vereador_in_scope(db, user, item.vereador_id)
+    if item.valor_utilizado > 0 or any(
+        [
+            has_records(db, MovimentacaoEmenda, MovimentacaoEmenda.emenda_id == emenda_id),
+            has_records(db, Compra, Compra.emenda_id == emenda_id),
+        ]
+    ):
+        raise HTTPException(status_code=409, detail="Emenda com utilização ou movimentações não pode ser excluída. Arquive o registro.")
+    before = as_dict(item)
+    db.delete(item)
+    audit(db, user, "emenda", emenda_id, "EXCLUIR", before=before)
+    db.commit()
+    return {"status": "ok"}
+
+
 @api.get("/emendas/{emenda_id}/movimentacoes")
 def list_movimentacoes_emenda(emenda_id: int, db: Session = Depends(get_db), user: Usuario = Depends(get_current_user)) -> list[dict[str, Any]]:
     emenda = db.get(Emenda, emenda_id)
@@ -691,6 +764,30 @@ def patch_polo_status(polo_id: int, payload: StatusPatch, db: Session = Depends(
     audit(db, user, "polo", item.id, "ALTERAR_STATUS", before=before, after=as_dict(item))
     db.commit()
     return as_dict(item)
+
+
+@api.delete("/polos/{polo_id}")
+def delete_polo(polo_id: int, db: Session = Depends(get_db), user: Usuario = Depends(get_current_user)) -> dict[str, str]:
+    require_admin(user)
+    item = ensure_polo_in_scope(db, user, polo_id)
+    if any(
+        [
+            has_records(db, Turma, Turma.polo_id == polo_id),
+            has_records(db, Usuario, Usuario.polo_id == polo_id),
+            has_records(db, BeneficiarioPolo, BeneficiarioPolo.polo_id == polo_id),
+            has_records(db, RequisicaoCompra, RequisicaoCompra.polo_id == polo_id),
+            has_records(db, Ocorrencia, Ocorrencia.polo_id == polo_id),
+            has_records(db, Encaminhamento, Encaminhamento.polo_id == polo_id),
+            has_records(db, DemandaImediata, DemandaImediata.polo_id == polo_id),
+            has_records(db, SugestaoCritica, SugestaoCritica.polo_id == polo_id),
+        ]
+    ):
+        raise HTTPException(status_code=409, detail="Polo possui vínculos operacionais e não pode ser excluído. Arquive o registro.")
+    before = as_dict(item)
+    db.delete(item)
+    audit(db, user, "polo", polo_id, "EXCLUIR", before=before)
+    db.commit()
+    return {"status": "ok"}
 
 
 @api.get("/beneficiarios/duplicidade")
@@ -840,6 +937,31 @@ def patch_beneficiario_status(beneficiario_id: int, payload: StatusPatch, db: Se
     audit(db, user, "beneficiario", item.id, "ALTERAR_STATUS", before=before, after=as_dict(item))
     db.commit()
     return serialize_beneficiario(item)
+
+
+@api.delete("/beneficiarios/{beneficiario_id}")
+def delete_beneficiario(beneficiario_id: int, db: Session = Depends(get_db), user: Usuario = Depends(get_current_user)) -> dict[str, str]:
+    item = db.get(Beneficiario, beneficiario_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Beneficiario nao encontrado.")
+    if not beneficiary_visible(db, user, beneficiario_id):
+        raise HTTPException(status_code=403, detail="Beneficiario fora do escopo.")
+    if any(
+        [
+            has_records(db, Inscricao, Inscricao.beneficiario_id == beneficiario_id),
+            has_records(db, GrupoFamiliar, GrupoFamiliar.beneficiario_id == beneficiario_id),
+            has_records(db, Ocorrencia, Ocorrencia.beneficiario_id == beneficiario_id),
+            has_records(db, Encaminhamento, Encaminhamento.beneficiario_id == beneficiario_id),
+            has_records(db, DemandaImediata, DemandaImediata.beneficiario_id == beneficiario_id),
+            has_records(db, SugestaoCritica, SugestaoCritica.beneficiario_id == beneficiario_id),
+        ]
+    ):
+        raise HTTPException(status_code=409, detail="Beneficiário possui histórico operacional e não pode ser excluído. Arquive o registro.")
+    before = serialize_beneficiario(item)
+    db.delete(item)
+    audit(db, user, "beneficiario", beneficiario_id, "EXCLUIR", before=before)
+    db.commit()
+    return {"status": "ok"}
 
 
 @api.get("/areas")
@@ -1170,6 +1292,48 @@ def create_fornecedor(payload: FornecedorIn, db: Session = Depends(get_db), user
     audit(db, user, "fornecedor", item.id, "CRIAR", after=as_dict(item))
     db.commit()
     return as_dict(item)
+
+
+@api.put("/fornecedores/{fornecedor_id}")
+def update_fornecedor(fornecedor_id: int, payload: FornecedorIn, db: Session = Depends(get_db), user: Usuario = Depends(get_current_user)) -> dict[str, Any]:
+    require_finance(user)
+    item = db.get(Fornecedor, fornecedor_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Fornecedor nao encontrado.")
+    before = as_dict(item)
+    for key, value in payload.model_dump().items():
+        setattr(item, key, value)
+    audit(db, user, "fornecedor", item.id, "ATUALIZAR", before=before, after=as_dict(item))
+    db.commit()
+    return as_dict(item)
+
+
+@api.patch("/fornecedores/{fornecedor_id}/status")
+def patch_fornecedor_status(fornecedor_id: int, payload: StatusPatch, db: Session = Depends(get_db), user: Usuario = Depends(get_current_user)) -> dict[str, Any]:
+    require_finance(user)
+    item = db.get(Fornecedor, fornecedor_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Fornecedor nao encontrado.")
+    before = as_dict(item)
+    item.ativo = payload.status.upper() in {"ATIVO", "ATIVA", "TRUE", "1"}
+    audit(db, user, "fornecedor", item.id, "ALTERAR_STATUS", before=before, after=as_dict(item))
+    db.commit()
+    return as_dict(item)
+
+
+@api.delete("/fornecedores/{fornecedor_id}")
+def delete_fornecedor(fornecedor_id: int, db: Session = Depends(get_db), user: Usuario = Depends(get_current_user)) -> dict[str, str]:
+    require_finance(user)
+    item = db.get(Fornecedor, fornecedor_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Fornecedor nao encontrado.")
+    if has_records(db, Compra, Compra.fornecedor_id == fornecedor_id):
+        raise HTTPException(status_code=409, detail="Fornecedor já foi usado em compras e não pode ser excluído. Arquive o registro.")
+    before = as_dict(item)
+    db.delete(item)
+    audit(db, user, "fornecedor", fornecedor_id, "EXCLUIR", before=before)
+    db.commit()
+    return {"status": "ok"}
 
 
 @api.get("/requisicoes-compra/fila")
