@@ -1,0 +1,17 @@
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.db
+*.sqlite3
+.venv/
+venv/
+.env
+.env.*
+
+.vscode/
+
+pytest-cache-files-*/
+
+node_modules/
+dist/
+build/
