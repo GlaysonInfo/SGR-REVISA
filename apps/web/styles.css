@@ -268,7 +268,7 @@ tbody tr:hover {
   border: 1px solid rgba(255, 255, 255, 0.2);
   background:
     radial-gradient(circle at center, rgba(255, 255, 255, 0.92) 0%, rgba(255, 255, 255, 0.82) 34%, rgba(255, 255, 255, 0.1) 100%),
-    url("/assets/Logo REVISA.png") center/78% no-repeat;
+    url("assets/Logo REVISA.png") center/78% no-repeat;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 24px 48px rgba(8, 47, 90, 0.16);
   animation: float-panel 8s ease-in-out infinite;
 }
@@ -579,7 +579,7 @@ tbody tr:hover {
   border-radius: 22px;
   background:
     linear-gradient(rgba(23, 99, 194, 0.14), rgba(47, 155, 85, 0.14)),
-    url("/assets/Mobile.jpg") center/cover;
+    url("assets/Mobile.jpg") center/cover;
 }
 
 @keyframes float-panel {
