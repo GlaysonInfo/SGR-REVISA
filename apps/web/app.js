@@ -8,9 +8,18 @@ const state = {
     section: "vereadores",
     editing: { entity: null, id: null },
   },
+  operacao: {
+    section: "turmas",
+  },
+  comprasUi: {
+    section: "requisicoes",
+  },
   management: {
     beneficiarios: { id: null },
     usuarios: { id: null },
+    turmas: { id: null },
+    encaminhamentos: { id: null },
+    requisicoes: { id: null },
   },
   base: {
     vereadores: [],
@@ -40,6 +49,20 @@ const cadastroSections = [
   ["polos", "Polos", "Unidades, responsáveis locais e território."],
   ["emendas", "Emendas", "Controle financeiro por vereador."],
   ["fornecedores", "Fornecedores", "Base de parceiros e compras."],
+];
+
+const operacaoSections = [
+  ["turmas", "Turmas", "Turmas, inscrições e capacidade operacional."],
+  ["frequencia", "Frequência", "Controle diário por turma."],
+  ["ocorrencias", "Ocorrências", "Registro de atendimentos e fatos relevantes."],
+  ["encaminhamentos", "Encaminhamentos", "Fluxo de apoio e encaminhamento social."],
+];
+
+const comprasSections = [
+  ["requisicoes", "Requisições", "Solicitações, aprovação e acompanhamento."],
+  ["execucao", "Execução", "Formalização da compra com fornecedor e emenda."],
+  ["documentos", "Documentos", "Notas fiscais e anexos da compra."],
+  ["compras", "Compras", "Histórico de compras executadas."],
 ];
 
 const $ = (selector) => document.querySelector(selector);
@@ -143,6 +166,27 @@ function clearManagementEditing(entity) {
 
 function activeManagementEditing(entity) {
   return Number(state.management[entity]?.id || 0) || null;
+}
+
+function setViewSection(viewKey, section) {
+  state[viewKey].section = section;
+}
+
+function renderSectionTabs(sections, activeSection, group, dataSource = null) {
+  return `
+    <div class="cadastro-switcher">
+      ${sections
+        .map(
+          ([id, label]) => `
+            <button type="button" class="cadastro-switch ${activeSection === id ? "active" : ""}" data-group="${group}" data-section="${id}">
+              <span>${label}</span>
+              <small>${dataSource ? (dataSource[id] ?? 0) : "Módulo"}</small>
+            </button>
+          `
+        )
+        .join("")}
+    </div>
+  `;
 }
 
 function entityLabel(entity) {
@@ -315,7 +359,7 @@ function renderCadastroTabs(activeSection) {
       ${cadastroSections
         .map(
           ([id, label]) => `
-            <button type="button" class="cadastro-switch ${activeSection === id ? "active" : ""}" data-section="${id}">
+            <button type="button" class="cadastro-switch ${activeSection === id ? "active" : ""}" data-group="cadastros" data-section="${id}">
               <span>${label}</span>
               <small>${(state.base[id] || []).length}</small>
             </button>
@@ -837,40 +881,87 @@ async function cadastrosView() {
   `;
 }
 
-async function operacaoView() {
-  await refreshBase();
-  const turmaRows = state.base.turmas.map(
-    (item) => `<tr><td>${esc(item.nome)}</td><td>${esc(item.polo_nome || "")}</td><td>${esc(item.modalidade_nome || "")}</td><td>${item.inscritos_ativos}/${item.capacidade}</td><td>${item.ativa ? "Ativa" : "Inativa"}</td></tr>`
-  );
-  const ocorrencias = await api("/ocorrencias").catch(() => []);
-  const encaminhamentos = await api("/encaminhamentos").catch(() => []);
-  const ocorrenciaRows = ocorrencias.map((item) => `<tr><td>${esc(item.tipo)}</td><td>${esc(item.descricao)}</td><td>${esc(item.data_ocorrencia)}</td></tr>`);
-  const encaminhamentoRows = encaminhamentos.map((item) => `<tr><td>${esc(item.tipo)}</td><td>${esc(item.destino)}</td><td>${esc(item.status)}</td></tr>`);
+function operacaoActionButtons(entity, item, archived = false, disableDelete = false) {
   return `
-    <section class="section">
-      <div class="grid-2">
-        <form id="turma-form" class="form-band">
-          <h3>Nova turma</h3>
+    <div class="table-actions">
+      ${actionIconButton("edit", entity, item.id, "Editar registro")}
+      ${actionIconButton("archive", entity, item.id, archived ? "Registro já arquivado" : "Arquivar registro", "warn", archived)}
+      ${actionIconButton("delete", entity, item.id, disableDelete ? "Registro não pode ser excluído" : "Excluir registro", "danger", disableDelete)}
+    </div>
+  `;
+}
+
+function renderTurmasOperacaoPanel() {
+  const editing = findCadastroItem("turmas", activeManagementEditing("turmas"));
+  const rows = state.base.turmas.map(
+    (item) => `
+      <tr>
+        <td>${esc(item.nome)}</td>
+        <td>${esc(item.polo_nome || "")}</td>
+        <td>${esc(item.modalidade_nome || "")}</td>
+        <td>${item.inscritos_ativos}/${item.capacidade}</td>
+        <td>${statusBadge(item.ativa ? "ATIVA" : "ARQUIVADA")}</td>
+        <td>${operacaoActionButtons("turmas", item, !item.ativa, item.inscritos_ativos > 0)}</td>
+      </tr>
+    `
+  );
+  return `
+    <div class="cadastro-layout">
+      <div class="section cadastro-form-stack">
+        <form id="turma-form" class="form-band cadastro-form">
+          <input type="hidden" name="id" value="${editing?.id || ""}" />
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Operação</p>
+              <h3>${editing ? "Editar turma" : "Nova turma"}</h3>
+            </div>
+            <span class="pill ${editing ? "warn" : "good"}">${editing ? "Edição" : "Novo"}</span>
+          </div>
           <div class="grid-2">
-            <label>Polo* <select name="polo_id" required>${options(state.base.polos)}</select></label>
-            <label>Modalidade* <select name="modalidade_id" required>${options(state.base.modalidades)}</select></label>
+            <label>Polo* <select name="polo_id" required>${optionsSelected(state.base.polos, editing?.polo_id)}</select></label>
+            <label>Modalidade* <select name="modalidade_id" required>${optionsSelected(state.base.modalidades, editing?.modalidade_id)}</select></label>
           </div>
           <div class="grid-3">
-            <label>Nome* <input name="nome" required /></label>
-            <label>Capacidade <input name="capacidade" type="number" value="20" /></label>
-            <label>Dias <input name="dias_semana" placeholder="Segunda e quarta" /></label>
+            <label>Nome* <input name="nome" value="${esc(editing?.nome || "")}" required /></label>
+            <label>Capacidade <input name="capacidade" type="number" value="${esc(editing?.capacidade || 20)}" /></label>
+            <label>Dias <input name="dias_semana" value="${esc(editing?.dias_semana || "")}" placeholder="Segunda e quarta" /></label>
           </div>
-          <button class="primary" type="submit">Salvar turma</button>
+          <div class="actions">
+            <button class="primary" type="submit">${editing ? "Atualizar turma" : "Salvar turma"}</button>
+            ${editing ? '<button type="button" class="ghost management-cancel" data-entity="turmas">Cancelar</button>' : ""}
+          </div>
         </form>
-        <form id="inscricao-form" class="form-band">
+        <form id="inscricao-form" class="form-band cadastro-form compact-form">
           <h3>Nova inscrição</h3>
           <label>Beneficiário* <select name="beneficiario_id" required>${options(state.base.beneficiarios)}</select></label>
           <label>Turma* <select name="turma_id" required>${options(state.base.turmas)}</select></label>
           <button class="primary" type="submit">Inscrever</button>
         </form>
       </div>
+      <div class="section cadastro-list-panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Listagem</p>
+            <h3>Turmas ativas e arquivadas</h3>
+          </div>
+          <span class="muted">Capacidade, status e ações rápidas</span>
+        </div>
+        ${table(["Nome", "Polo", "Modalidade", "Inscritos", "Status", "Ações"], rows)}
+      </div>
+    </div>
+  `;
+}
+
+function renderFrequenciaOperacaoPanel() {
+  return `
+    <section class="section">
       <form id="frequencia-loader" class="form-band">
-        <h3>Frequência diária</h3>
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Frequência</p>
+            <h3>Frequência diária</h3>
+          </div>
+        </div>
         <div class="grid-3">
           <label>Turma <select name="turma_id">${options(state.base.turmas)}</select></label>
           <label>Data <input name="data" type="date" value="${today()}" /></label>
@@ -878,31 +969,261 @@ async function operacaoView() {
         </div>
         <div id="frequencia-area"></div>
       </form>
-      <div class="grid-2">
-        <form id="ocorrencia-form" class="form-band">
-          <h3>Ocorrência</h3>
-          <label>Beneficiário <select name="beneficiario_id">${options(state.base.beneficiarios)}</select></label>
-          <label>Polo <select name="polo_id">${options(state.base.polos)}</select></label>
-          <label>Tipo <input name="tipo" value="Atendimento" /></label>
-          <label>Descrição <textarea name="descricao" required></textarea></label>
-          <button class="primary" type="submit">Registrar ocorrência</button>
-        </form>
-        <form id="encaminhamento-form" class="form-band">
-          <h3>Encaminhamento</h3>
-          <label>Beneficiário <select name="beneficiario_id">${options(state.base.beneficiarios)}</select></label>
-          <label>Polo <select name="polo_id">${options(state.base.polos)}</select></label>
-          <div class="grid-2">
-            <label>Tipo <input name="tipo" value="Serviço social" /></label>
-            <label>Destino <input name="destino" value="CRAS" /></label>
+    </section>
+  `;
+}
+
+function renderOcorrenciasOperacaoPanel(ocorrencias) {
+  const rows = ocorrencias.map(
+    (item) => `<tr><td>${esc(item.tipo)}</td><td>${esc(item.descricao)}</td><td>${esc(item.data_ocorrencia)}</td></tr>`
+  );
+  return `
+    <div class="cadastro-layout">
+      <form id="ocorrencia-form" class="form-band cadastro-form">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Ocorrências</p>
+            <h3>Registrar ocorrência</h3>
           </div>
-          <label>Descrição <textarea name="descricao"></textarea></label>
-          <button class="primary" type="submit">Registrar encaminhamento</button>
-        </form>
+        </div>
+        <label>Beneficiário <select name="beneficiario_id">${options(state.base.beneficiarios)}</select></label>
+        <label>Polo <select name="polo_id">${options(state.base.polos)}</select></label>
+        <label>Tipo <input name="tipo" value="Atendimento" /></label>
+        <label>Descrição <textarea name="descricao" required></textarea></label>
+        <button class="primary" type="submit">Registrar ocorrência</button>
+      </form>
+      <div class="section cadastro-list-panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Histórico</p>
+            <h3>Ocorrências registradas</h3>
+          </div>
+        </div>
+        ${table(["Tipo", "Descrição", "Data"], rows)}
       </div>
-      <div class="section"><h3>Turmas</h3>${table(["Nome", "Polo", "Modalidade", "Inscritos", "Status"], turmaRows)}</div>
-      <div class="grid-2">
-        <div class="section"><h3>Ocorrências</h3>${table(["Tipo", "Descrição", "Data"], ocorrenciaRows)}</div>
-        <div class="section"><h3>Encaminhamentos</h3>${table(["Tipo", "Destino", "Status"], encaminhamentoRows)}</div>
+    </div>
+  `;
+}
+
+function renderEncaminhamentosOperacaoPanel(encaminhamentos) {
+  const editing = encaminhamentos.find((item) => item.id === activeManagementEditing("encaminhamentos")) || null;
+  const rows = encaminhamentos.map(
+    (item) => `
+      <tr>
+        <td>${esc(item.tipo)}</td>
+        <td>${esc(item.destino)}</td>
+        <td>${statusBadge(item.status)}</td>
+        <td>${operacaoActionButtons("encaminhamentos", item, String(item.status).toUpperCase().includes("ARQUIV"))}</td>
+      </tr>
+    `
+  );
+  return `
+    <div class="cadastro-layout">
+      <form id="encaminhamento-form" class="form-band cadastro-form">
+        <input type="hidden" name="id" value="${editing?.id || ""}" />
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Encaminhamento</p>
+            <h3>${editing ? "Editar encaminhamento" : "Novo encaminhamento"}</h3>
+          </div>
+          <span class="pill ${editing ? "warn" : "good"}">${editing ? "Edição" : "Novo"}</span>
+        </div>
+        <label>Beneficiário <select name="beneficiario_id">${optionsSelected(state.base.beneficiarios, editing?.beneficiario_id)}</select></label>
+        <label>Polo <select name="polo_id">${optionsSelected(state.base.polos, editing?.polo_id)}</select></label>
+        <div class="grid-2">
+          <label>Tipo <input name="tipo" value="${esc(editing?.tipo || "Serviço social")}" /></label>
+          <label>Destino <input name="destino" value="${esc(editing?.destino || "CRAS")}" /></label>
+        </div>
+        <label>Status
+          <select name="status">
+            <option value="ABERTO"${editing?.status === "ABERTO" || !editing ? " selected" : ""}>Aberto</option>
+            <option value="EM_ANDAMENTO"${editing?.status === "EM_ANDAMENTO" ? " selected" : ""}>Em andamento</option>
+            <option value="CONCLUIDO"${editing?.status === "CONCLUIDO" ? " selected" : ""}>Concluído</option>
+            <option value="ARQUIVADO"${editing?.status === "ARQUIVADO" ? " selected" : ""}>Arquivado</option>
+          </select>
+        </label>
+        <label>Descrição <textarea name="descricao">${esc(editing?.descricao || "")}</textarea></label>
+        <div class="actions">
+          <button class="primary" type="submit">${editing ? "Atualizar encaminhamento" : "Registrar encaminhamento"}</button>
+          ${editing ? '<button type="button" class="ghost management-cancel" data-entity="encaminhamentos">Cancelar</button>' : ""}
+        </div>
+      </form>
+      <div class="section cadastro-list-panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Listagem</p>
+            <h3>Encaminhamentos</h3>
+          </div>
+        </div>
+        ${table(["Tipo", "Destino", "Status", "Ações"], rows)}
+      </div>
+    </div>
+  `;
+}
+
+async function operacaoView() {
+  await refreshBase();
+  const ocorrencias = await api("/ocorrencias").catch(() => []);
+  const encaminhamentos = await api("/encaminhamentos").catch(() => []);
+  const activeSection = state.operacao.section;
+  const descriptions = Object.fromEntries(operacaoSections.map(([id, , description]) => [id, description]));
+  const counters = {
+    turmas: state.base.turmas.length,
+    frequencia: state.base.turmas.length,
+    ocorrencias: ocorrencias.length,
+    encaminhamentos: encaminhamentos.length,
+  };
+  const panels = {
+    turmas: renderTurmasOperacaoPanel(),
+    frequencia: renderFrequenciaOperacaoPanel(),
+    ocorrencias: renderOcorrenciasOperacaoPanel(ocorrencias),
+    encaminhamentos: renderEncaminhamentosOperacaoPanel(encaminhamentos),
+  };
+  return `
+    <section class="section">
+      <div class="item-card cadastro-overview">
+        <div>
+          <p class="eyebrow">Operação separada</p>
+          <h3>${operacaoSections.find(([id]) => id === activeSection)?.[1] || "Operação"}</h3>
+          <p class="muted">${descriptions[activeSection]}</p>
+        </div>
+        ${renderSectionTabs(operacaoSections, activeSection, "operacao", counters)}
+      </div>
+      ${panels[activeSection]}
+    </section>
+  `;
+}
+
+function renderRequisicoesCompraPanel(requisicoes) {
+  const editing = requisicoes.find((item) => item.id === activeManagementEditing("requisicoes")) || null;
+  const itemAtual = editing?.itens?.[0] || null;
+  const rows = requisicoes.map(
+    (item) => `
+      <tr>
+        <td>${esc(item.descricao)}</td>
+        <td>${esc(item.polo_nome || "")}</td>
+        <td>${statusBadge(item.status)}</td>
+        <td>${money(item.total_estimado)}</td>
+        <td>
+          <div class="actions inline-actions">
+            <button class="ghost req-action" data-id="${item.id}" data-action="enviar">Enviar</button>
+            <button class="secondary req-action" data-id="${item.id}" data-action="aprovar">Aprovar</button>
+            <button class="danger req-action" data-id="${item.id}" data-action="reprovar">Reprovar</button>
+          </div>
+        </td>
+        <td>${operacaoActionButtons("requisicoes", item, item.status === "DEVOLVIDA" || item.status === "REPROVADA", item.status === "EXECUTADA")}</td>
+      </tr>
+    `
+  );
+  return `
+    <div class="cadastro-layout">
+      <form id="requisicao-form" class="form-band cadastro-form">
+        <input type="hidden" name="id" value="${editing?.id || ""}" />
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Compras</p>
+            <h3>${editing ? "Editar requisição" : "Nova requisição"}</h3>
+          </div>
+          <span class="pill ${editing ? "warn" : "good"}">${editing ? "Edição" : "Novo"}</span>
+        </div>
+        <label>Polo* <select name="polo_id" required>${optionsSelected(state.base.polos, editing?.polo_id)}</select></label>
+        <label>Descrição* <textarea name="descricao" required>${esc(editing?.descricao || "")}</textarea></label>
+        <div class="grid-2">
+          <label>Prioridade <select name="prioridade"><option${editing?.prioridade === "NORMAL" || !editing ? " selected" : ""}>NORMAL</option><option${editing?.prioridade === "ALTA" ? " selected" : ""}>ALTA</option><option${editing?.prioridade === "URGENTE" ? " selected" : ""}>URGENTE</option></select></label>
+          <label>Status <select name="status"><option${editing?.status === "ABERTA" || !editing ? " selected" : ""}>ABERTA</option><option${editing?.status === "RASCUNHO" ? " selected" : ""}>RASCUNHO</option><option${editing?.status === "DEVOLVIDA" ? " selected" : ""}>DEVOLVIDA</option></select></label>
+        </div>
+        <h3>Item principal</h3>
+        <div class="grid-4">
+          <label>Descrição* <input name="item_descricao" value="${esc(itemAtual?.descricao || "")}" required /></label>
+          <label>Quantidade* <input name="item_quantidade" type="number" value="${esc(itemAtual?.quantidade || 1)}" step="0.01" required /></label>
+          <label>Unidade <input name="item_unidade" value="${esc(itemAtual?.unidade || "un")}" /></label>
+          <label>Valor estimado <input name="item_valor" type="number" value="${esc(itemAtual?.valor_estimado || 0)}" step="0.01" /></label>
+        </div>
+        <div class="actions">
+          <button class="primary" type="submit">${editing ? "Atualizar requisição" : "Abrir requisição"}</button>
+          ${editing ? '<button type="button" class="ghost management-cancel" data-entity="requisicoes">Cancelar</button>' : ""}
+        </div>
+      </form>
+      <div class="section cadastro-list-panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Fluxo</p>
+            <h3>Requisições</h3>
+          </div>
+        </div>
+        ${table(["Descrição", "Polo", "Status", "Estimado", "Fluxo", "Ações"], rows)}
+      </div>
+    </div>
+  `;
+}
+
+function renderExecucaoCompraPanel(aprovadas) {
+  return `
+    <div class="cadastro-layout">
+      <form id="compra-form" class="form-band cadastro-form">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Execução</p>
+            <h3>Executar compra</h3>
+          </div>
+        </div>
+        <label>Requisição aprovada <select name="requisicao_id">${options(aprovadas, "descricao")}</select></label>
+        <label>Fornecedor <select name="fornecedor_id">${options(state.base.fornecedores)}</select></label>
+        <label>Emenda <select name="emenda_id">${state.base.emendas.map((item) => `<option value="${item.id}">${esc(item.codigo)} · ${money(item.valor_disponivel)}</option>`).join("")}</select></label>
+        <label>Valor total <input name="valor_total" type="number" step="0.01" required /></label>
+        <button class="primary" type="submit">Executar compra</button>
+      </form>
+      <div class="section cadastro-list-panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Aprovadas</p>
+            <h3>Requisições prontas para compra</h3>
+          </div>
+        </div>
+        ${table(["Descrição", "Polo", "Status", "Estimado"], aprovadas.map((item) => `<tr><td>${esc(item.descricao)}</td><td>${esc(item.polo_nome || "")}</td><td>${statusBadge(item.status)}</td><td>${money(item.total_estimado)}</td></tr>`))}
+      </div>
+    </div>
+  `;
+}
+
+function renderDocumentosCompraPanel(compras) {
+  return `
+    <div class="cadastro-layout">
+      <form id="nota-form" class="form-band cadastro-form">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Documentos</p>
+            <h3>Registrar nota fiscal</h3>
+          </div>
+        </div>
+        <label>Compra <select name="compra_id">${compras.map((item) => `<option value="${item.id}">Compra #${item.id} · ${money(item.valor_total)}</option>`).join("")}</select></label>
+        <div class="grid-3">
+          <label>Número <input name="numero" required /></label>
+          <label>Chave de acesso <input name="chave_acesso" /></label>
+          <label>Nome do arquivo <input name="nome_arquivo" placeholder="nota.pdf" /></label>
+        </div>
+        <button class="secondary" type="submit">Registrar documento</button>
+      </form>
+      <div class="item-card cadastro-list-panel">
+        <p class="eyebrow">Observação</p>
+        <h3>Documentos vinculados às compras</h3>
+        <p class="muted">Selecione uma compra executada, informe número e chave de acesso. O documento ficará associado ao histórico financeiro da emenda.</p>
+      </div>
+    </div>
+  `;
+}
+
+function renderComprasExecutadasPanel(compras) {
+  return `
+    <section class="section">
+      <div class="section cadastro-list-panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Histórico</p>
+            <h3>Compras executadas</h3>
+          </div>
+        </div>
+        ${table(["ID", "Fornecedor", "Emenda", "Valor", "Status"], compras.map((item) => `<tr><td>${item.id}</td><td>${esc(item.fornecedor_nome || "")}</td><td>${esc(item.emenda_codigo || "")}</td><td>${money(item.valor_total)}</td><td>${statusBadge(item.status)}</td></tr>`))}
       </div>
     </section>
   `;
@@ -913,65 +1234,31 @@ async function comprasView() {
   const requisicoes = await api("/requisicoes-compra").catch(() => []);
   const aprovadas = await api("/requisicoes-compra/aprovadas").catch(() => []);
   const compras = await api("/compras").catch(() => []);
-  const reqRows = requisicoes.map(
-    (item) => `
-      <tr>
-        <td>${esc(item.descricao)}</td>
-        <td>${esc(item.polo_nome || "")}</td>
-        <td><span class="status ${item.status === "APROVADA" ? "good" : item.status === "REPROVADA" ? "bad" : "warn"}">${esc(item.status)}</span></td>
-        <td>${money(item.total_estimado)}</td>
-        <td>
-          <div class="actions">
-            <button class="ghost req-action" data-id="${item.id}" data-action="enviar">Enviar</button>
-            <button class="secondary req-action" data-id="${item.id}" data-action="aprovar">Aprovar</button>
-            <button class="danger req-action" data-id="${item.id}" data-action="reprovar">Reprovar</button>
-          </div>
-        </td>
-      </tr>
-    `
-  );
-  const compraRows = compras.map((item) => `<tr><td>${item.id}</td><td>${esc(item.fornecedor_nome || "")}</td><td>${esc(item.emenda_codigo || "")}</td><td>${money(item.valor_total)}</td><td>${esc(item.status)}</td></tr>`);
+  const activeSection = state.comprasUi.section;
+  const descriptions = Object.fromEntries(comprasSections.map(([id, , description]) => [id, description]));
+  const counters = {
+    requisicoes: requisicoes.length,
+    execucao: aprovadas.length,
+    documentos: compras.length,
+    compras: compras.length,
+  };
+  const panels = {
+    requisicoes: renderRequisicoesCompraPanel(requisicoes),
+    execucao: renderExecucaoCompraPanel(aprovadas),
+    documentos: renderDocumentosCompraPanel(compras),
+    compras: renderComprasExecutadasPanel(compras),
+  };
   return `
     <section class="section">
-      <div class="grid-2">
-        <form id="requisicao-form" class="form-band">
-          <h3>Nova requisição</h3>
-          <label>Polo* <select name="polo_id" required>${options(state.base.polos)}</select></label>
-          <label>Descrição* <textarea name="descricao" required></textarea></label>
-          <div class="grid-2">
-            <label>Prioridade <select name="prioridade"><option>NORMAL</option><option>ALTA</option><option>URGENTE</option></select></label>
-            <label>Status <select name="status"><option>ABERTA</option><option>RASCUNHO</option></select></label>
-          </div>
-          <h3>Item</h3>
-          <div class="grid-4">
-            <label>Descrição* <input name="item_descricao" required /></label>
-            <label>Quantidade* <input name="item_quantidade" type="number" value="1" step="0.01" required /></label>
-            <label>Unidade <input name="item_unidade" value="un" /></label>
-            <label>Valor estimado <input name="item_valor" type="number" value="0" step="0.01" /></label>
-          </div>
-          <button class="primary" type="submit">Abrir requisição</button>
-        </form>
-        <form id="compra-form" class="form-band">
-          <h3>Execução de compra</h3>
-          <label>Requisição aprovada <select name="requisicao_id">${options(aprovadas, "descricao")}</select></label>
-          <label>Fornecedor <select name="fornecedor_id">${options(state.base.fornecedores)}</select></label>
-          <label>Emenda <select name="emenda_id">${state.base.emendas.map((item) => `<option value="${item.id}">${esc(item.codigo)} · ${money(item.valor_disponivel)}</option>`).join("")}</select></label>
-          <label>Valor total <input name="valor_total" type="number" step="0.01" required /></label>
-          <button class="primary" type="submit">Executar compra</button>
-        </form>
-      </div>
-      <form id="nota-form" class="form-band">
-        <h3>Upload de nota fiscal</h3>
-        <div class="grid-4">
-          <label>Compra <select name="compra_id">${compras.map((item) => `<option value="${item.id}">Compra #${item.id} · ${money(item.valor_total)}</option>`).join("")}</select></label>
-          <label>Número <input name="numero" required /></label>
-          <label>Chave de acesso <input name="chave_acesso" /></label>
-          <label>Nome do arquivo <input name="nome_arquivo" placeholder="nota.pdf" /></label>
+      <div class="item-card cadastro-overview">
+        <div>
+          <p class="eyebrow">Compras separadas</p>
+          <h3>${comprasSections.find(([id]) => id === activeSection)?.[1] || "Compras"}</h3>
+          <p class="muted">${descriptions[activeSection]}</p>
         </div>
-        <button class="secondary" type="submit">Registrar documento</button>
-      </form>
-      <div class="section"><h3>Requisições</h3>${table(["Descrição", "Polo", "Status", "Estimado", "Ações"], reqRows)}</div>
-      <div class="section"><h3>Compras executadas</h3>${table(["ID", "Fornecedor", "Emenda", "Valor", "Status"], compraRows)}</div>
+        ${renderSectionTabs(comprasSections, activeSection, "comprasUi", counters)}
+      </div>
+      ${panels[activeSection]}
     </section>
   `;
 }
@@ -1229,6 +1516,166 @@ async function handleUsuarioAction(action, id) {
   }
 }
 
+async function submitTurmaForm(form) {
+  const data = formData(form);
+  const id = Number(data.id || 0) || null;
+  const payload = {
+    polo_id: Number(data.polo_id),
+    modalidade_id: Number(data.modalidade_id),
+    nome: data.nome,
+    capacidade: Number(data.capacidade || 20),
+    dias_semana: data.dias_semana || null,
+  };
+  try {
+    await api(id ? `/turmas/${id}` : "/turmas", { method: id ? "PUT" : "POST", body: JSON.stringify(payload) });
+    clearManagementEditing("turmas");
+    showToast(`Turma ${id ? "atualizada" : "salva"}.`);
+    await refreshBase();
+    await render();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function handleTurmaAction(action, id) {
+  if (action === "edit") {
+    setManagementEditing("turmas", id);
+    setViewSection("operacao", "turmas");
+    await render();
+    return;
+  }
+  if (action === "archive") {
+    const confirmed = window.confirm("Arquivar esta turma? Ela ficará indisponível para novas inscrições.");
+    if (!confirmed) return;
+    try {
+      await api(`/turmas/${id}/status`, { method: "PATCH", body: JSON.stringify({ status: "INATIVA" }) });
+      clearManagementEditing("turmas");
+      showToast("Turma arquivada.");
+      await refreshBase();
+      await render();
+    } catch (error) {
+      showToast(error.message);
+    }
+    return;
+  }
+  const confirmed = window.confirm("Excluir esta turma?");
+  if (!confirmed) return;
+  try {
+    await api(`/turmas/${id}`, { method: "DELETE" });
+    clearManagementEditing("turmas");
+    showToast("Turma excluída.");
+    await refreshBase();
+    await render();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function submitEncaminhamentoForm(form) {
+  const data = formData(form);
+  const id = Number(data.id || 0) || null;
+  const payload = {
+    beneficiario_id: Number(data.beneficiario_id),
+    polo_id: Number(data.polo_id),
+    tipo: data.tipo,
+    destino: data.destino,
+    descricao: data.descricao || null,
+    status: data.status || "ABERTO",
+  };
+  try {
+    await api(id ? `/encaminhamentos/${id}` : "/encaminhamentos", { method: id ? "PUT" : "POST", body: JSON.stringify(payload) });
+    clearManagementEditing("encaminhamentos");
+    showToast(`Encaminhamento ${id ? "atualizado" : "registrado"}.`);
+    await render();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function handleEncaminhamentoAction(action, id) {
+  if (action === "edit") {
+    setManagementEditing("encaminhamentos", id);
+    setViewSection("operacao", "encaminhamentos");
+    await render();
+    return;
+  }
+  if (action === "archive") {
+    const confirmed = window.confirm("Arquivar este encaminhamento?");
+    if (!confirmed) return;
+    try {
+      await api(`/encaminhamentos/${id}/status`, { method: "PATCH", body: JSON.stringify({ status: "ARQUIVADO" }) });
+      clearManagementEditing("encaminhamentos");
+      showToast("Encaminhamento arquivado.");
+      await render();
+    } catch (error) {
+      showToast(error.message);
+    }
+    return;
+  }
+  const confirmed = window.confirm("Excluir este encaminhamento?");
+  if (!confirmed) return;
+  try {
+    await api(`/encaminhamentos/${id}`, { method: "DELETE" });
+    clearManagementEditing("encaminhamentos");
+    showToast("Encaminhamento excluído.");
+    await render();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function submitRequisicaoForm(form) {
+  const data = formData(form);
+  const id = Number(data.id || 0) || null;
+  const payload = {
+    polo_id: Number(data.polo_id),
+    descricao: data.descricao,
+    prioridade: data.prioridade,
+    status: data.status,
+    itens: [{ descricao: data.item_descricao, quantidade: Number(data.item_quantidade), unidade: data.item_unidade, valor_estimado: Number(data.item_valor || 0) }],
+  };
+  try {
+    await api(id ? `/requisicoes-compra/${id}` : "/requisicoes-compra", { method: id ? "PUT" : "POST", body: JSON.stringify(payload) });
+    clearManagementEditing("requisicoes");
+    showToast(`Requisição ${id ? "atualizada" : "aberta"}.`);
+    await render();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function handleRequisicaoAction(action, id) {
+  if (action === "edit") {
+    setManagementEditing("requisicoes", id);
+    setViewSection("comprasUi", "requisicoes");
+    await render();
+    return;
+  }
+  if (action === "archive") {
+    const confirmed = window.confirm("Mover esta requisição para devolvida?");
+    if (!confirmed) return;
+    try {
+      await api(`/requisicoes-compra/${id}/devolver`, { method: "POST", body: "{}" });
+      clearManagementEditing("requisicoes");
+      showToast("Requisição devolvida.");
+      await render();
+    } catch (error) {
+      showToast(error.message);
+    }
+    return;
+  }
+  const confirmed = window.confirm("Excluir esta requisição?");
+  if (!confirmed) return;
+  try {
+    await api(`/requisicoes-compra/${id}`, { method: "DELETE" });
+    clearManagementEditing("requisicoes");
+    showToast("Requisição excluída.");
+    await render();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
 function bindViewEvents() {
   const mobileForm = $("#mobile-form");
   if (mobileForm) {
@@ -1276,6 +1723,24 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll('.cadastro-action[data-entity="turmas"]').forEach((button) => {
+    button.addEventListener("click", async () => {
+      await handleTurmaAction(button.dataset.action, Number(button.dataset.id));
+    });
+  });
+
+  document.querySelectorAll('.cadastro-action[data-entity="encaminhamentos"]').forEach((button) => {
+    button.addEventListener("click", async () => {
+      await handleEncaminhamentoAction(button.dataset.action, Number(button.dataset.id));
+    });
+  });
+
+  document.querySelectorAll('.cadastro-action[data-entity="requisicoes"]').forEach((button) => {
+    button.addEventListener("click", async () => {
+      await handleRequisicaoAction(button.dataset.action, Number(button.dataset.id));
+    });
+  });
+
   document.querySelectorAll(".management-cancel").forEach((button) => {
     button.addEventListener("click", async () => {
       clearManagementEditing(button.dataset.entity);
@@ -1283,9 +1748,23 @@ function bindViewEvents() {
     });
   });
 
-  document.querySelectorAll(".cadastro-switch").forEach((button) => {
+  document.querySelectorAll('.cadastro-switch[data-group="cadastros"]').forEach((button) => {
     button.addEventListener("click", async () => {
       setCadastroSection(button.dataset.section);
+      await render();
+    });
+  });
+
+  document.querySelectorAll('.cadastro-switch[data-group="operacao"]').forEach((button) => {
+    button.addEventListener("click", async () => {
+      setViewSection("operacao", button.dataset.section);
+      await render();
+    });
+  });
+
+  document.querySelectorAll('.cadastro-switch[data-group="comprasUi"]').forEach((button) => {
+    button.addEventListener("click", async () => {
+      setViewSection("comprasUi", button.dataset.section);
       await render();
     });
   });
@@ -1339,18 +1818,7 @@ function bindViewEvents() {
   if (turmaForm) {
     turmaForm.addEventListener("submit", (event) => {
       event.preventDefault();
-      submitJson(
-        turmaForm,
-        "/turmas",
-        (data) => ({
-          polo_id: Number(data.polo_id),
-          modalidade_id: Number(data.modalidade_id),
-          nome: data.nome,
-          capacidade: Number(data.capacidade || 20),
-          dias_semana: data.dias_semana || null,
-        }),
-        "Turma salva."
-      );
+      submitTurmaForm(turmaForm);
     });
   }
 
@@ -1430,12 +1898,7 @@ function bindViewEvents() {
   if (encaminhamentoForm) {
     encaminhamentoForm.addEventListener("submit", (event) => {
       event.preventDefault();
-      submitJson(
-        encaminhamentoForm,
-        "/encaminhamentos",
-        (data) => ({ beneficiario_id: Number(data.beneficiario_id), polo_id: Number(data.polo_id), tipo: data.tipo, destino: data.destino, descricao: data.descricao || null }),
-        "Encaminhamento registrado."
-      );
+      submitEncaminhamentoForm(encaminhamentoForm);
     });
   }
 
@@ -1443,18 +1906,7 @@ function bindViewEvents() {
   if (requisicaoForm) {
     requisicaoForm.addEventListener("submit", (event) => {
       event.preventDefault();
-      submitJson(
-        requisicaoForm,
-        "/requisicoes-compra",
-        (data) => ({
-          polo_id: Number(data.polo_id),
-          descricao: data.descricao,
-          prioridade: data.prioridade,
-          status: data.status,
-          itens: [{ descricao: data.item_descricao, quantidade: Number(data.item_quantidade), unidade: data.item_unidade, valor_estimado: Number(data.item_valor || 0) }],
-        }),
-        "Requisição aberta."
-      );
+      submitRequisicaoForm(requisicaoForm);
     });
   }
 

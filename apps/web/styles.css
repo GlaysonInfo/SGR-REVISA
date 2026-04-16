@@ -521,6 +521,15 @@ tbody tr:hover {
   align-items: start;
 }
 
+.cadastro-form-stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.compact-form {
+  align-self: start;
+}
+
 .cadastro-form,
 .cadastro-list-panel {
   min-width: 0;
@@ -572,6 +581,15 @@ tbody tr:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 0.6rem;
+}
+
+.inline-actions {
+  gap: 0.45rem;
+}
+
+.inline-actions button {
+  min-height: 34px;
+  padding: 0.55rem 0.85rem;
 }
 
 .table-actions {

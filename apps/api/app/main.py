@@ -1091,6 +1091,26 @@ def patch_turma_status(turma_id: int, payload: StatusPatch, db: Session = Depend
     return as_dict(item)
 
 
+@api.delete("/turmas/{turma_id}")
+def delete_turma(turma_id: int, db: Session = Depends(get_db), user: Usuario = Depends(get_current_user)) -> dict[str, str]:
+    item = db.get(Turma, turma_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Turma nao encontrada.")
+    ensure_polo_in_scope(db, user, item.polo_id)
+    if any(
+        [
+            has_records(db, Inscricao, Inscricao.turma_id == turma_id),
+            has_records(db, Frequencia, Frequencia.inscricao_id.in_(select(Inscricao.id).where(Inscricao.turma_id == turma_id))),
+        ]
+    ):
+        raise HTTPException(status_code=409, detail="Turma possui inscrições ou frequência registrada e não pode ser excluída. Arquive o registro.")
+    before = as_dict(item)
+    db.delete(item)
+    audit(db, user, "turma", turma_id, "EXCLUIR", before=before)
+    db.commit()
+    return {"status": "ok"}
+
+
 @api.get("/turmas/{turma_id}/inscritos")
 def turma_inscritos(turma_id: int, db: Session = Depends(get_db), user: Usuario = Depends(get_current_user)) -> list[dict[str, Any]]:
     turma = db.get(Turma, turma_id)
@@ -1277,6 +1297,19 @@ def patch_encaminhamento_status(encaminhamento_id: int, payload: StatusPatch, db
     return as_dict(item)
 
 
+@api.delete("/encaminhamentos/{encaminhamento_id}")
+def delete_encaminhamento(encaminhamento_id: int, db: Session = Depends(get_db), user: Usuario = Depends(get_current_user)) -> dict[str, str]:
+    item = db.get(Encaminhamento, encaminhamento_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Encaminhamento nao encontrado.")
+    ensure_polo_in_scope(db, user, item.polo_id)
+    before = as_dict(item)
+    db.delete(item)
+    audit(db, user, "encaminhamento", encaminhamento_id, "EXCLUIR", before=before)
+    db.commit()
+    return {"status": "ok"}
+
+
 @api.get("/fornecedores")
 def list_fornecedores(db: Session = Depends(get_db), user: Usuario = Depends(get_current_user)) -> list[dict[str, Any]]:
     items = db.execute(select(Fornecedor).order_by(Fornecedor.nome)).scalars().all()
@@ -1413,7 +1446,10 @@ def update_requisicao(requisicao_id: int, payload: RequisicaoIn, db: Session = D
     if not item:
         raise HTTPException(status_code=404, detail="Requisicao nao encontrada.")
     ensure_polo_in_scope(db, user, item.polo_id)
+    novo_polo = ensure_polo_in_scope(db, user, payload.polo_id)
     before = serialize_requisicao(item)
+    item.polo_id = novo_polo.id
+    item.vereador_id = novo_polo.vereador_id
     item.descricao = payload.descricao
     item.prioridade = payload.prioridade
     item.status = payload.status
@@ -1424,6 +1460,21 @@ def update_requisicao(requisicao_id: int, payload: RequisicaoIn, db: Session = D
     db.commit()
     db.refresh(item)
     return serialize_requisicao(item)
+
+
+@api.delete("/requisicoes-compra/{requisicao_id}")
+def delete_requisicao(requisicao_id: int, db: Session = Depends(get_db), user: Usuario = Depends(get_current_user)) -> dict[str, str]:
+    item = db.get(RequisicaoCompra, requisicao_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Requisicao nao encontrada.")
+    ensure_polo_in_scope(db, user, item.polo_id)
+    if has_records(db, Compra, Compra.requisicao_id == requisicao_id):
+        raise HTTPException(status_code=409, detail="Requisição já executada em compra e não pode ser excluída.")
+    before = serialize_requisicao(item)
+    db.delete(item)
+    audit(db, user, "requisicao_compra", requisicao_id, "EXCLUIR", before=before)
+    db.commit()
+    return {"status": "ok"}
 
 
 @api.get("/requisicoes-compra/{requisicao_id}/historico")
