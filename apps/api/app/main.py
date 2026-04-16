@@ -106,6 +106,11 @@ def create_app() -> FastAPI:
     return app
 
 
+@api.get("/health")
+def healthcheck() -> dict[str, str]:
+    return {"status": "ok"}
+
+
 def only_digits(value: str | None) -> str | None:
     if value is None:
         return None

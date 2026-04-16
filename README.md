@@ -71,3 +71,61 @@ tests/
 ## Observações
 
 O MVP usa SQLite para rodar imediatamente no workspace. A documentação recomenda PostgreSQL para produção; a camada SQLAlchemy já deixa essa troca concentrada em `SGR_DATABASE_URL`.
+
+## Deploy no Render
+
+Sem domínio próprio, o cliente pode acessar normalmente pela URL pública do Render, por exemplo:
+
+```text
+https://sgr-revisa.onrender.com
+```
+
+### Arquitetura recomendada
+
+- `Web Service` no Render para rodar FastAPI e servir o frontend.
+- `PostgreSQL` gerenciado no próprio Render.
+- Variáveis de ambiente configuradas no painel do serviço.
+
+### Variáveis de ambiente
+
+Configure no serviço web:
+
+```text
+SGR_DATABASE_URL=<External Database URL do PostgreSQL Render>
+SGR_SECRET_KEY=<valor longo e aleatório>
+SGR_ACCESS_TOKEN_MINUTES=480
+PYTHON_VERSION=3.13.9
+```
+
+### Start command
+
+```text
+uvicorn apps.api.app.main:app --host 0.0.0.0 --port $PORT
+```
+
+### Health check path
+
+```text
+/api/v1/health
+```
+
+### Passo a passo
+
+1. Crie um banco PostgreSQL no Render.
+2. Copie a `External Database URL` do banco.
+3. Crie um `Web Service` conectado a este repositório.
+4. Use `pip install -r apps/api/requirements.txt` como build command.
+5. Use `uvicorn apps.api.app.main:app --host 0.0.0.0 --port $PORT` como start command.
+6. Configure `SGR_DATABASE_URL` com a URL do banco.
+7. Configure `SGR_SECRET_KEY` com um segredo forte.
+8. Faça o primeiro deploy.
+
+### Observações de produção
+
+- O projeto aceita automaticamente URLs `postgres://` e `postgresql://` do Render.
+- O banco é criado na inicialização e a base inicial é semeada automaticamente.
+- Sem domínio próprio, a URL do Render já atende para uso externo.
+
+### Limitação do plano gratuito
+
+Se usar plano free do Render, o serviço pode entrar em modo de espera após inatividade. Para operação diária com cliente, prefira plano sem sleep.

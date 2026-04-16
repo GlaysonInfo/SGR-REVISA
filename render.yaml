@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: sgr-revisa
+    runtime: python
+    plan: free
+    buildCommand: pip install -r apps/api/requirements.txt
+    startCommand: uvicorn apps.api.app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.9
+      - key: SGR_ACCESS_TOKEN_MINUTES
+        value: 480
+      - key: SGR_SECRET_KEY
+        generateValue: true
+      - key: SGR_DATABASE_URL
+        fromDatabase:
+          name: sgr-revisa-db
+          property: connectionString
+
+databases:
+  - name: sgr-revisa-db
+    plan: free
